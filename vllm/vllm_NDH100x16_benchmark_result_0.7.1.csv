@@ -1,0 +1,1 @@
+Models,DataType,Batch,InputLen,OutputLen,PromptTokenPerSec,GenerationTokenPerSec,TimeToFirstToken(ms),InterTokenLatency(ms)

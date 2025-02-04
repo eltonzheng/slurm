@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+*.jsonl
+
+# Node cache
+node_cache_*
+torch_cache_*
+
+# Environment
+.env 
