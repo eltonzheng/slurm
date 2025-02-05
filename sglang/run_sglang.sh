@@ -5,10 +5,10 @@ source /opt/conda/etc/profile.d/conda.sh
 conda activate deepseek
 
 # NCCL Configuration
+#export NCCL_IB_DISABLE=0         # Enable InfiniBand
+#export NCCL_NET_GDR_LEVEL=2      # Enable GPUDirect RDMA
+#export NCCL_P2P_DISABLE=0        # Enable P2P between GPUs
 #export NCCL_DEBUG=INFO           # Enable NCCL debugging
-export NCCL_IB_DISABLE=0         # Enable InfiniBand
-export NCCL_NET_GDR_LEVEL=2      # Enable GPUDirect RDMA
-export NCCL_P2P_DISABLE=0        # Enable P2P between GPUs
 #export NCCL_SOCKET_IFNAME=ibp0,eth0
 
 #export NCCL_DEBUG=INFO
@@ -51,4 +51,6 @@ python -m sglang.launch_server \
     --dist-init-addr $(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1):$MASTER_PORT \
     --nnodes 2 \
     --node-rank $SLURM_NODEID \
-    --trust-remote-code 
+    --trust-remote-code \
+    --host 0.0.0.0 \
+    --port 40000

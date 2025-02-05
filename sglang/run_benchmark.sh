@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_runs=10
+num_runs=5
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
 MODEL_DIR=${1:-~/models}
@@ -109,40 +109,73 @@ else
         #"qwen2-1.5b,awq,$MODEL_DIR/Qwen2-1.5B-Instruct-awq"
         #"deepseek-r1-dist-qwen-32b,fp16,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
         #"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
-        "deepseek-r1,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
+        "deepseek-r1,fp8,/mnt/vast/deepseek/HF/DeepSeek-R1"
     )
     in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "1:4096,256" "4:4096,256" "8:4096,256" "16:4096,256")
     #in_out_sizes_mistral=("32:1024,256" "64:1024,256" "128:1024,256")
 fi
 
 #in_out_sizes_llama2=("1:4096,256")
-#in_out_sizes_mistral=("1:1024,256")
+#in_out_sizes_mistral=("1:2048,256" "4:1024,256")
 
 json_to_csv() {
     # Read input JSON file
     local json_file=$1
     local csv_file=$2
     local model_name=$3
+    local data_type=$4
 
     # Write CSV header if file doesn't exist
     if [ ! -f "$csv_file" ]; then
         echo "Models,DataType,Batch,InputLen,OutputLen,PromptTokenPerSec,GenerationTokenPerSec,TimeToFirstToken(ms),InterTokenLatency(ms)" > "$csv_file"
     fi
 
-    # Process JSON and extract values
+    # Create temporary arrays to store values for averaging
+    declare -A sum_ttft
+    declare -A sum_tpot
+    declare -A count
+    declare -A batch_sizes
+    declare -A input_lens
+    declare -A output_lens
+
+    # First pass: accumulate values
     while IFS= read -r line; do
-        # Extract values using jq or awk
         batch=$(echo "$line" | grep -o '"max_concurrency": [0-9]*' | awk '{print $2}')
         input_len=$(echo "$line" | grep -o '"random_input_len": [0-9]*' | awk '{print $2}')
         output_len=$(echo "$line" | grep -o '"random_output_len": [0-9]*' | awk '{print $2}')
-        ttft=$(echo "$line" | grep -o '"mean_ttft_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
-        tpot=$(echo "$line" | grep -o '"mean_tpot_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
-        input_throughput=$(echo "($batch * $input_len * 1000) / $ttft" | bc | awk '{printf "%.0f", $1}')
-        output_throughput=$(echo "($batch * 1000) / $tpot" | bc | awk '{printf "%.0f", $1}')
+        ttft=$(echo "$line" | grep -o '"mean_ttft_ms": [0-9.]*' | awk '{print $2}')
+        tpot=$(echo "$line" | grep -o '"mean_tpot_ms": [0-9.]*' | awk '{print $2}')
 
-        # Write to CSV
-        echo "$model_name,fp8,$batch,$input_len,$output_len,$input_throughput,$output_throughput,$ttft,$tpot" >> "$csv_file"
+        # Create a key for this configuration
+        key="${batch}_${input_len}_${output_len}"
+        
+        # Store the configuration values
+        batch_sizes[$key]=$batch
+        input_lens[$key]=$input_len
+        output_lens[$key]=$output_len
+        
+        # Accumulate sums
+        sum_ttft[$key]=$(echo "${sum_ttft[$key]:-0} + $ttft" | bc)
+        sum_tpot[$key]=$(echo "${sum_tpot[$key]:-0} + $tpot" | bc)
+        count[$key]=$((${count[$key]:-0} + 1))
     done < "$json_file"
+
+    # Second pass: calculate averages and write results in sorted order
+    # Create an array of keys sorted by input_len (field 2) then by batch (field 1)
+    sorted_keys=( $(for key in "${!count[@]}"; do echo "$key"; done | sort -t '_' -k2,2n -k1,1n) )
+
+    for key in "${sorted_keys[@]}"; do
+        # Calculate averages
+        avg_ttft=$(echo "scale=2; ${sum_ttft[$key]} / ${count[$key]}" | bc)
+        avg_tpot=$(echo "scale=2; ${sum_tpot[$key]} / ${count[$key]}" | bc)
+
+        # Calculate throughputs using averages
+        input_throughput=$(echo "(${batch_sizes[$key]} * ${input_lens[$key]} * 1000) / $avg_ttft" | bc | awk '{printf "%.0f", $1}')
+        output_throughput=$(echo "(${batch_sizes[$key]} * 1000) / $avg_tpot" | bc | awk '{printf "%.0f", $1}')
+
+        # Write merged results to CSV
+        echo "$model_name,$data_type,${batch_sizes[$key]},${input_lens[$key]},${output_lens[$key]},$input_throughput,$output_throughput,$avg_ttft,$avg_tpot" >> "$csv_file"
+    done
 }
 
 function test_model() {
@@ -190,19 +223,24 @@ function test_model() {
         echo "Python Benchmark - Model: $model_name, Type: $data_type, BS: $batch_size, ISL/OSL: ${in_out_pair[0]}/${in_out_pair[1]}"
         echo "==========================================================================================="
 
-        python3 -m sglang.bench_serving \
-            --backend sglang \
-            --num-prompt $((num_runs * batch_size)) \
-            --port 30000 \
-            --random-range-ratio 1.0 \
-            --random-input-len ${in_out_pair[0]} \
-            --random-output-len ${in_out_pair[1]} \
-            --dataset-name random \
-            --max-concurrency $batch_size \
-            --output-file ${json_file}
+        #BACKEND="vllm"
+        BACKEND="sglang"
+        for ((run=1; run<=num_runs; run++)); do
+            echo "Run $run of $num_runs"
+            python3 -m sglang.bench_serving \
+                --backend $BACKEND \
+                --num-prompt $batch_size \
+                --port 40000 \
+                --random-range-ratio 1.0 \
+                --random-input-len ${in_out_pair[0]} \
+                --random-output-len ${in_out_pair[1]} \
+                --dataset-name random \
+                --max-concurrency $batch_size \
+                --output-file ${json_file}
+        done
     done
 
-	json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}.csv" "$model_name"
+	json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}.csv" "$model_name" "$data_type"
 }
 
 for model in "${models[@]}"
