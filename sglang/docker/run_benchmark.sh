@@ -1,6 +1,8 @@
 #!/bin/bash
 
-num_runs=5
+export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
+
+num_runs=8
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
 MODEL_DIR=${1:-~/models}
@@ -111,12 +113,10 @@ else
         #"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
         "deepseek-r1,fp8,/models/DeepSeek-R1"
     )
-    in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "1:4096,256" "4:4096,256" "8:4096,256" "16:4096,256")
-    #in_out_sizes_mistral=("32:1024,256" "64:1024,256" "128:1024,256")
+    in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256")
 fi
 
-#in_out_sizes_llama2=("1:4096,256")
-#in_out_sizes_mistral=("1:2048,256")
+#in_out_sizes_mistral=("1:1024,256")
 
 json_to_csv() {
     # Read input JSON file
@@ -130,15 +130,14 @@ json_to_csv() {
         echo "Models,DataType,Batch,InputLen,OutputLen,PromptTokenPerSec,GenerationTokenPerSec,TimeToFirstToken(ms),InterTokenLatency(ms)" > "$csv_file"
     fi
 
-    # Create temporary arrays to store values for averaging
-    declare -A sum_ttft
-    declare -A sum_tpot
-    declare -A count
+    # Create temporary arrays to store values
+    declare -A values_ttft
+    declare -A values_tpot
     declare -A batch_sizes
     declare -A input_lens
     declare -A output_lens
 
-    # First pass: accumulate values
+    # First pass: collect all values for each configuration
     while IFS= read -r line; do
         batch=$(echo "$line" | grep -o '"max_concurrency": [0-9]*' | awk '{print $2}')
         input_len=$(echo "$line" | grep -o '"random_input_len": [0-9]*' | awk '{print $2}')
@@ -154,27 +153,61 @@ json_to_csv() {
         input_lens[$key]=$input_len
         output_lens[$key]=$output_len
 
-        # Accumulate sums
-        sum_ttft[$key]=$(echo "${sum_ttft[$key]:-0} + $ttft" | bc)
-        sum_tpot[$key]=$(echo "${sum_tpot[$key]:-0} + $tpot" | bc)
-        count[$key]=$((${count[$key]:-0} + 1))
+        # Append values to arrays
+        values_ttft[$key]="${values_ttft[$key]:-}${ttft} "
+        values_tpot[$key]="${values_tpot[$key]:-}${tpot} "
     done < "$json_file"
 
-    # Second pass: calculate averages and write results in sorted order
-    # Create an array of keys sorted by input_len (field 2) then by batch (field 1)
-    sorted_keys=( $(for key in "${!count[@]}"; do echo "$key"; done | sort -t '_' -k2,2n -k1,1n) )
+    # Second pass: calculate averages excluding min and max
+    sorted_keys=( $(for key in "${!batch_sizes[@]}"; do echo "$key"; done | sort -t '_' -k2,2n -k1,1n) )
 
     for key in "${sorted_keys[@]}"; do
-        # Calculate averages
-        avg_ttft=$(echo "scale=2; ${sum_ttft[$key]} / ${count[$key]}" | bc)
-        avg_tpot=$(echo "scale=2; ${sum_tpot[$key]} / ${count[$key]}" | bc)
+        # Convert space-separated strings to arrays
+        ttft_array=(${values_ttft[$key]})
+        tpot_array=(${values_tpot[$key]})
 
-        # Calculate throughputs using averages
-        input_throughput=$(echo "(${batch_sizes[$key]} * ${input_lens[$key]} * 1000) / $avg_ttft" | bc | awk '{printf "%.0f", $1}')
-        output_throughput=$(echo "(${batch_sizes[$key]} * 1000) / $avg_tpot" | bc | awk '{printf "%.0f", $1}')
+        # Need at least 3 values to exclude min and max
+        if [ ${#ttft_array[@]} -ge 3 ]; then
+            echo "Processing key: $key"
+            echo "Original TTFT values: ${ttft_array[*]}"
+            echo "Original TPOT values: ${tpot_array[*]}"
 
-        # Write merged results to CSV
-        echo "$model_name,$data_type,${batch_sizes[$key]},${input_lens[$key]},${output_lens[$key]},$input_throughput,$output_throughput,$avg_ttft,$avg_tpot" >> "$csv_file"
+            # Sort arrays numerically
+            IFS=$'\n' ttft_sorted=($(sort -n <<<"${ttft_array[*]}"))
+            IFS=$'\n' tpot_sorted=($(sort -n <<<"${tpot_array[*]}"))
+            unset IFS
+
+            echo "Sorted TTFT values: ${ttft_sorted[*]}"
+            echo "Sorted TPOT values: ${tpot_sorted[*]}"
+
+            # Remove first (min) and last (max) elements
+            ttft_sorted=("${ttft_sorted[@]:1:${#ttft_sorted[@]}-2}")
+            tpot_sorted=("${tpot_sorted[@]:1:${#tpot_sorted[@]}-2}")
+
+            echo "After removing min/max TTFT: ${ttft_sorted[*]}"
+            echo "After removing min/max TPOT: ${tpot_sorted[*]}"
+
+            # Calculate averages
+            ttft_sum=0
+            tpot_sum=0
+            for i in "${!ttft_sorted[@]}"; do
+                ttft_sum=$(echo "$ttft_sum + ${ttft_sorted[$i]}" | bc)
+                tpot_sum=$(echo "$tpot_sum + ${tpot_sorted[$i]}" | bc)
+            done
+
+            avg_ttft=$(echo "scale=2; $ttft_sum / ${#ttft_sorted[@]}" | bc)
+            avg_tpot=$(echo "scale=2; $tpot_sum / ${#tpot_sorted[@]}" | bc)
+
+            echo "Final averages - TTFT: $avg_ttft, TPOT: $avg_tpot"
+            echo "----------------------------------------"
+
+            # Calculate throughputs using averages
+            input_throughput=$(echo "(${batch_sizes[$key]} * ${input_lens[$key]} * 1000) / $avg_ttft" | bc | awk '{printf "%.0f", $1}')
+            output_throughput=$(echo "(${batch_sizes[$key]} * 1000) / $avg_tpot" | bc | awk '{printf "%.0f", $1}')
+
+            # Write merged results to CSV
+            echo "$model_name,$data_type,${batch_sizes[$key]},${input_lens[$key]},${output_lens[$key]},$input_throughput,$output_throughput,$avg_ttft,$avg_tpot" >> "$csv_file"
+        fi
     done
 }
 

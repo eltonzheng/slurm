@@ -45,10 +45,36 @@ mkdir -p $TORCH_INDUCTOR_CACHE_DIR
 echo "Using cache directory: $OUTLINES_CACHE_DIR"
 echo "Using cache directory: $TORCH_INDUCTOR_CACHE_DIR"
 
+get_first_node() {
+    local nodelist=$1
+    local first_node=""
+    
+    if [[ $nodelist =~ .*,.* ]]; then
+        # Format: h100-183-003,h100-202-005
+        first_node=$(echo $nodelist | cut -d',' -f1)
+    elif [[ $nodelist =~ .*\[.*\].* ]]; then
+        # Format: h100-183-[003-004]
+        # Extract the base and first number
+        local base=$(echo $nodelist | sed 's/\[.*\]//')
+        local first_num=$(echo $nodelist | grep -o '\[.*\]' | tr -d '[]' | cut -d'-' -f1)
+        first_node="${base}${first_num}"
+    else
+        # Single node format: h100-183-003
+        first_node=$nodelist
+    fi
+    
+    echo $first_node
+}
+
+export HEAD_NODE=$(get_first_node "$SLURM_JOB_NODELIST")
+export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
+#    --output=deepseek_sglang_h100_node${SLURM_NODEID} \
+#    --force-overwrite=true \
+#/root/nsight-systems-2025.1.1/bin/nsys launch --trace=cuda,nvtx,osrt,cudnn,cublas \
 python3 -m sglang.launch_server \
     --model-path /models/DeepSeek-R1 \
     --tp 16 \
-    --dist-init-addr $(echo $SLURM_JOB_NODELIST | cut -d',' -f1):$MASTER_PORT \
+    --dist-init-addr $HEAD_NODE:$MASTER_PORT \
     --nnodes 2 \
     --node-rank $SLURM_NODEID \
     --trust-remote-code \

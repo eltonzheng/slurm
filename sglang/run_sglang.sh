@@ -45,6 +45,7 @@ mkdir -p $TORCH_INDUCTOR_CACHE_DIR
 echo "Using cache directory: $OUTLINES_CACHE_DIR"
 echo "Using cache directory: $TORCH_INDUCTOR_CACHE_DIR"
 
+#~/nsight-systems-2025.1.1/bin/nsys launch --trace=cuda,nvtx,osrt,cudnn,cublas --cuda-graph-trace=node \
 python -m sglang.launch_server \
     --model-path /mnt/vast/deepseek/HF/DeepSeek-R1 \
     --tp 16 \

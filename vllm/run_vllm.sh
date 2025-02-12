@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Add error handling
+set -e
+set -o pipefail
+
+# Add logging
+exec 1> >(tee -a "/tmp/sglang_$(date +%Y%m%d_%H%M%S).log")
+exec 2>&1
+
 # For conda:
 source /opt/conda/etc/profile.d/conda.sh
 conda activate vllm
@@ -13,13 +21,34 @@ echo "NCCL_IB_DISABLE: $NCCL_IB_DISABLE"
 echo "Node: $(hostname)"
 
 # Ray configuration
-export RAY_HEAD_NODE="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)"
+get_first_node() {
+    local nodelist=$1
+    local first_node=""
+    
+    if [[ $nodelist =~ .*,.* ]]; then
+        # Format: h100-183-003,h100-202-005
+        first_node=$(echo $nodelist | cut -d',' -f1)
+    elif [[ $nodelist =~ .*\[.*\].* ]]; then
+        # Format: h100-183-[003-004]
+        # Extract the base and first number
+        local base=$(echo $nodelist | sed 's/\[.*\]//')
+        local first_num=$(echo $nodelist | grep -o '\[.*\]' | tr -d '[]' | cut -d'-' -f1)
+        first_node="${base}${first_num}"
+    else
+        # Single node format: h100-183-003
+        first_node=$nodelist
+    fi
+    
+    echo $first_node
+}
+
+export RAY_HEAD_NODE=$(get_first_node "$SLURM_JOB_NODELIST")
 export RAY_HEAD_PORT=6379
 export RAY_ADDRESS_FILE=~/ray_head_address
-export JOB_ID=$SLURM_JOB_ID  # Use SLURM job ID instead of timestamp
-echo "Current JOB_ID: $JOB_ID"  # Debug print
+export JOB_ID=$SLURM_JOB_ID
+echo "Current JOB_ID: $JOB_ID"
 
-echo "Ray head node: $RAY_HEAD_NODE"
+echo "Ray head node: $RAY_HEAD_NODE"  # This will print h100-131-004
 echo "Node rank: $SLURM_NODEID"
 
 # Start Ray based on node rank
@@ -66,11 +95,11 @@ sleep 10
 # Only run vllm serve on the head node
 if [ "$SLURM_NODEID" -eq 0 ]; then
     vllm serve /mnt/vast/deepseek/HF/DeepSeek-R1 \
-        --tensor-parallel-size 8 \
-        --pipeline-parallel-size 2 \
+        --tensor-parallel-size 16 \
+        --pipeline-parallel-size 1 \
         --max-model-len 8192 \
         --trust-remote-code \
         --gpu-memory-utilization 0.8 \
         --host 0.0.0.0 \
-        --port 40000
+        --port 40000 2>&1 | tee /tmp/vllm_server.log
 fi
