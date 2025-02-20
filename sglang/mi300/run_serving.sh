@@ -6,7 +6,7 @@ num_runs=8
 MODEL_DIR=${1:-~/models}
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
-RESULT_FILE=${2:-./sglang_benchmark_result_$(date +%Y%m%d_%H%M%S)}
+RESULT_FILE=${2:-./sglang_serving_result_MI300}
 
 # Function to detect GPU type
 extra_options=""
@@ -42,7 +42,11 @@ models=(
 #"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
 "deepseek-r1,fp8,/mnt/vast/deepseek/HF/DeepSeek-R1"
 )
-in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "256:1024,256" "512:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256" "256:2048,256" "512:2048,256")
+#in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "256:1024,256" "512:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256" "256:2048,256" "512:2048,256")
+in_out_sizes_mistral=("1:2048,256" "2:2048,256")
+
+#in_out_sizes_llama2=("1:4096,256")
+#in_out_sizes_mistral=("1:2048,256" "4:1024,256")
 
 json_to_csv() {
     # Read input JSON file
@@ -178,22 +182,22 @@ function test_model() {
         echo "Python Benchmark - Model: $model_name, Type: $data_type, BS: $batch_size, ISL/OSL: ${in_out_pair[0]}/${in_out_pair[1]}"
         echo "==========================================================================================="
 
+	num_prompts=10
+        total_num_prompts=$(( num_prompts * batch_size ))
+        total_num_prompts=$(( total_num_prompts > 4000 ? 4000 : total_num_prompts ))
+
+
         #BACKEND="vllm"
         BACKEND="sglang"
-        for ((run=1; run<=num_runs; run++)); do
-            echo "Run $run of $num_runs"
-            python3 -m sglang.bench_serving \
+        echo "Run $run of $num_runs"
+        python3 -m sglang.bench_serving \
                 --backend $BACKEND \
                 --model /models/DeepSeek-R1 \
-                --num-prompt $batch_size \
+                --num-prompt $total_num_prompts \
+		--dataset-name sharegpt \
                 --port 30000 \
-                --random-range-ratio 1.0 \
-                --random-input-len ${in_out_pair[0]} \
-                --random-output-len ${in_out_pair[1]} \
-                --dataset-name random \
                 --max-concurrency $batch_size \
                 --output-file ${json_file}
-        done
     done
 
 	json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}.csv" "$model_name" "$data_type"
