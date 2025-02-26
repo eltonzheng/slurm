@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
+#export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
 
 num_runs=8
 
@@ -262,7 +262,7 @@ function test_model() {
             echo "Run $run of $num_runs"
             python3 -m sglang.bench_serving \
                 --backend $BACKEND \
-                --model /mnt/vast/deepseek/HF/DeepSeek-R1 \
+                --model ./tokenizer \
                 --num-prompt $batch_size \
                 --port 40000 \
                 --random-range-ratio 1.0 \

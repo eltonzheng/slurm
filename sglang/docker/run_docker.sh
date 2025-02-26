@@ -48,7 +48,7 @@ echo "Using cache directory: $TORCH_INDUCTOR_CACHE_DIR"
 get_first_node() {
     local nodelist=$1
     local first_node=""
-    
+
     if [[ $nodelist =~ .*,.* ]]; then
         # Format: h100-183-003,h100-202-005
         first_node=$(echo $nodelist | cut -d',' -f1)
@@ -62,14 +62,12 @@ get_first_node() {
         # Single node format: h100-183-003
         first_node=$nodelist
     fi
-    
+
     echo $first_node
 }
 
 export HEAD_NODE=$(get_first_node "$SLURM_JOB_NODELIST")
-export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
-#    --output=deepseek_sglang_h100_node${SLURM_NODEID} \
-#    --force-overwrite=true \
+#export SGLANG_TORCH_PROFILER_DIR=$HOME/profile_logs
 #/root/nsight-systems-2025.1.1/bin/nsys launch --trace=cuda,nvtx,osrt,cudnn,cublas \
 python3 -m sglang.launch_server \
     --model-path /models/DeepSeek-R1 \
@@ -78,5 +76,6 @@ python3 -m sglang.launch_server \
     --nnodes 2 \
     --node-rank $SLURM_NODEID \
     --trust-remote-code \
+    --enable-torch-compile --torch-compile-max-bs 8 \
     --host 0.0.0.0 \
     --port 40000
