@@ -1,12 +1,12 @@
 #!/bin/bash
 
-num_runs=8
+num_runs=2
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
 MODEL_DIR=${1:-~/models}
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
-RESULT_FILE=${2:-./sglang_benchmark_result_$(date +%Y%m%d_%H%M%S)}
+RESULT_FILE=${2:-./sglang_NDH100x16_benchmark_result}
 
 # Function to detect GPU type
 extra_options=""
@@ -42,7 +42,10 @@ models=(
 #"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
 "deepseek-r1,fp8,/mnt/vast/deepseek/HF/DeepSeek-R1"
 )
-in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "256:1024,256" "512:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256" "256:2048,256" "512:2048,256")
+in_out_sizes_mistral=("1:1024,10")
+
+#in_out_sizes_llama2=("1:4096,256")
+#in_out_sizes_mistral=("1:2048,256" "4:1024,256")
 
 json_to_csv() {
     # Read input JSON file
@@ -179,6 +182,7 @@ function test_model() {
         echo "==========================================================================================="
 
         #BACKEND="vllm"
+	export SGLANG_TORCH_PROFILER_DIR=/tmp
         BACKEND="sglang"
         for ((run=1; run<=num_runs; run++)); do
             echo "Run $run of $num_runs"
@@ -192,6 +196,7 @@ function test_model() {
                 --random-output-len ${in_out_pair[1]} \
                 --dataset-name random \
                 --max-concurrency $batch_size \
+		--profile \
                 --output-file ${json_file}
         done
     done
