@@ -66,6 +66,21 @@ class RequestFuncOutput:
     error: str = ""
     output_len: int = 0
 
+global PapyrusHeaders
+
+def create_papyrus_headers(model_name: str):
+    from azure.identity import AzureCliCredential, DefaultAzureCredential
+
+    verify_scope = "api://5fe538a8-15d5-4a84-961e-be66cd036687/.default"
+    cur_credential = DefaultAzureCredential()
+    access_token = cur_credential.get_token(verify_scope).token
+
+    return {
+        "Authorization": "Bearer " + access_token,
+        "Content-Type": "application/json",
+        "papyrus-model-name": model_name,
+        "papyrus-quota-id": "PapyrusCustomer",
+    }
 
 def remove_prefix(text: str, prefix: str) -> str:
     return text[len(prefix) :] if text.startswith(prefix) else text
@@ -154,9 +169,24 @@ async def async_request_papyrus_completions(
     prompt = request_func_input.prompt
 
     async with aiohttp.ClientSession(timeout=AIOHTTP_TIMEOUT) as session:
+        #payload = {
+        #    "model": request_func_input.model,
+        #    "prompt": prompt,
+        #    "temperature": 0.0,
+        #    "best_of": 1,
+        #    "max_tokens": request_func_input.output_len,
+        #    "stream": not args.disable_stream,
+        #    "ignore_eos": not args.disable_ignore_eos,
+        #    **request_func_input.extra_request_body,
+        #}
         payload = {
             "model": request_func_input.model,
-            "prompt": prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
             "temperature": 0.0,
             "best_of": 1,
             "max_tokens": request_func_input.output_len,
@@ -164,25 +194,10 @@ async def async_request_papyrus_completions(
             "ignore_eos": not args.disable_ignore_eos,
             **request_func_input.extra_request_body,
         }
+
+        global PapyrusHeaders
+        headers = PapyrusHeaders
         #headers = {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}"}
-        from azure.identity import AzureCliCredential, DefaultAzureCredential
-
-        verify_scope = "api://5fe538a8-15d5-4a84-961e-be66cd036687/.default"
-
-        cur_credential = DefaultAzureCredential()
-        access_token = cur_credential.get_token(verify_scope).token
-        print("access_token: ", access_token)
-
-        # Replace "PapyrusCustomer" if you have an existing quota string
-        papyrus_quota_id = "PapyrusCustomer"
-
-        headers = {
-            "Authorization": "Bearer " + access_token,
-            "Content-Type": "application/json",
-            "papyrus-model-name": "deepseekr1-eval",
-            "papyrus-quota-id": papyrus_quota_id,
-            "papyrus-timeout-ms": "100000",
-        }
 
         output = RequestFuncOutput()
         output.prompt_len = request_func_input.prompt_len
@@ -211,7 +226,7 @@ async def async_request_papyrus_completions(
                             # NOTE: Some completion API might have a last
                             # usage summary response without a token so we
                             # want to check a token was generated
-                            if data["choices"][0]["text"]:
+                            if data and data["choices"] and data["choices"][0]["delta"]["content"]:
                                 timestamp = time.perf_counter()
                                 # First token
                                 if ttft == 0.0:
@@ -223,7 +238,7 @@ async def async_request_papyrus_completions(
                                     output.itl.append(timestamp - most_recent_timestamp)
 
                                 most_recent_timestamp = timestamp
-                                generated_text += data["choices"][0]["text"]
+                                generated_text += data["choices"][0]["delta"]["content"]
 
                     output.generated_text = generated_text
                     output.success = True
@@ -232,6 +247,7 @@ async def async_request_papyrus_completions(
                 else:
                     output.error = response.reason or ""
                     output.success = False
+                    PapyrusHeaders = create_papyrus_headers(request_func_input.model)
         except Exception:
             output.success = False
             exc_info = sys.exc_info()
@@ -1328,6 +1344,11 @@ def run_benchmark(args_: argparse.Namespace):
             if args.base_url
             else f"http://{args.host}:{args.port}/v1/models/model:predict"
         )
+    elif args.backend == "papyrus":
+        global PapyrusHeaders
+        PapyrusHeaders = create_papyrus_headers(args.model)
+        assert args.base_url is not None, "base_url is required for papyrus backend"
+        api_url = args.base_url
     base_url = (
         f"http://{args.host}:{args.port}" if args.base_url is None else args.base_url
     )
