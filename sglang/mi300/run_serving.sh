@@ -1,210 +1,109 @@
 #!/bin/bash
 
-num_runs=8
-
 # Set ENGINE_DIR if provided, otherwise use "./engines"
 MODEL_DIR=${1:-~/models}
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
-RESULT_FILE=${2:-./sglang_serving_result_MI300}
+RESULT_FILE=${2:-./sglang_benchmark_result_$(date +%Y%m%d_%H%M%S)}
 
-# Function to detect GPU type
-extra_options=""
-
-
-models=(
-#"llama2-7b,fp16,$MODEL_DIR/llama2-7b-hf"
-#"llama2-7b,fp8,$MODEL_DIR/llama2-7b-hf"
-#"llama2-7b,gptq,$MODEL_DIR/llama2-7b-gptq"
-#"llama2-7b,awq,$MODEL_DIR/llama2-7b-awq"
-#"llama3-8b,fp16,$MODEL_DIR/Meta-Llama-3-8B"
-#"llama3-8b,fp8,$MODEL_DIR/Meta-Llama-3-8B"
-#"llama3-8b,gptq,$MODEL_DIR/Meta-Llama-3-8B-gptq"
-#"llama3-8b,awq,$MODEL_DIR/Meta-Llama-3-8B-awq"
-#"mistral-7b-v0.3,fp16,$MODEL_DIR/Mistral-7B-Instruct-v0.3"
-#"mistral-7b-v0.3,fp8,$MODEL_DIR/Mistral-7B-Instruct-v0.3"
-#"mistral-7b-v0.3,gptq,$MODEL_DIR/Mistral-7B-Instruct-v0.3-gptq"
-#"mistral-7b-v0.3,awq,$MODEL_DIR/Mistral-7B-Instruct-v0.3-awq"
-#"mixtral-8x7b,fp16,$MODEL_DIR/Mixtral-8x7B-v0.1"
-#"phi-3-mini-4k,fp16,$MODEL_DIR/phi-3-mini-4k-instruct"
-#"phi-3-mini-4k,fp8,$MODEL_DIR/phi-3-mini-4k-instruct"
-#"phi-4,fp16,$MODEL_DIR/phi-4"
-#"phi-4,fp8,$MODEL_DIR/phi-4"
-#"qwen2-0.5b,fp16,$MODEL_DIR/Qwen2-0.5B-Instruct"
-#"qwen2-0.5b,fp8,$MODEL_DIR/Qwen2-0.5B-Instruct"
-#"qwen2-0.5b,gptq,$MODEL_DIR/Qwen2-0.5B-Instruct-gptq"
-#"qwen2-0.5b,awq,$MODEL_DIR/Qwen2-0.5B-Instruct-awq"
-#"qwen2-1.5b,fp16,$MODEL_DIR/Qwen2-1.5B-Instruct"
-#"qwen2-1.5b,fp8,$MODEL_DIR/Qwen2-1.5B-Instruct"
-#"qwen2-1.5b,gptq,$MODEL_DIR/Qwen2-1.5B-Instruct-gptq"
-#"qwen2-1.5b,awq,$MODEL_DIR/Qwen2-1.5B-Instruct-awq"
-#"deepseek-r1-dist-qwen-32b,fp16,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
-#"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
-"deepseek-r1,fp8,/mnt/vast/deepseek/HF/DeepSeek-R1"
-)
-#in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "256:1024,256" "512:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256" "256:2048,256" "512:2048,256")
-in_out_sizes_mistral=("1:2048,256" "2:2048,256")
-
-#in_out_sizes_llama2=("1:4096,256")
-#in_out_sizes_mistral=("1:2048,256" "4:1024,256")
-
+# Function to extract values from a output log file and save to a CSV file
 json_to_csv() {
-    # Read input JSON file
     local json_file=$1
     local csv_file=$2
-    local model_name=$3
-    local data_type=$4
+    local model=$3
+    local backend=$4
+    local expected_concurrency=$5
 
-    # Write CSV header if file doesn't exist
-    if [ ! -f "$csv_file" ]; then
-        echo "Models,DataType,Batch,InputLen,OutputLen,PromptTokenPerSec,GenerationTokenPerSec,TimeToFirstToken(ms),InterTokenLatency(ms)" > "$csv_file"
-    fi
+    # Read the last line from the JSONL file (most recent record)
+    local json_line=$(tail -n 1 "$json_file")
 
-    # Create temporary arrays to store values
-    declare -A values_ttft
-    declare -A values_tpot
-    declare -A batch_sizes
-    declare -A input_lens
-    declare -A output_lens
+    # Extract values using grep and awk, format floats to 2 decimal places
+    local completed=$(echo "$json_line" | grep -o '"completed": [0-9]*' | awk '{print $2}')
+    local concurrency=$(echo "$json_line" | grep -o '"concurrency": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local duration=$(echo "$json_line" | grep -o '"duration": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local total_input_tokens=$(echo "$json_line" | grep -o '"total_input_tokens": [0-9]*' | awk '{print $2}')
+    local total_output_tokens=$(echo "$json_line" | grep -o '"total_output_tokens": [0-9]*' | awk '{print $2}')
+    local request_throughput=$(echo "$json_line" | grep -o '"request_throughput": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local input_throughput=$(echo "$json_line" | grep -o '"input_throughput": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local output_throughput=$(echo "$json_line" | grep -o '"output_throughput": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local mean_ttft=$(echo "$json_line" | grep -o '"mean_ttft_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local median_ttft=$(echo "$json_line" | grep -o '"median_ttft_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local p99_ttft=$(echo "$json_line" | grep -o '"p99_ttft_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local mean_tpot=$(echo "$json_line" | grep -o '"mean_tpot_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local median_tpot=$(echo "$json_line" | grep -o '"median_tpot_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
+    local p99_tpot=$(echo "$json_line" | grep -o '"p99_tpot_ms": [0-9.]*' | awk '{printf "%.2f", $2}')
 
-    # First pass: collect all values for each configuration
-    while IFS= read -r line; do
-        batch=$(echo "$line" | grep -o '"max_concurrency": [0-9]*' | awk '{print $2}')
-        input_len=$(echo "$line" | grep -o '"random_input_len": [0-9]*' | awk '{print $2}')
-        output_len=$(echo "$line" | grep -o '"random_output_len": [0-9]*' | awk '{print $2}')
-        ttft=$(echo "$line" | grep -o '"mean_ttft_ms": [0-9.]*' | awk '{print $2}')
-        tpot=$(echo "$line" | grep -o '"mean_tpot_ms": [0-9.]*' | awk '{print $2}')
-
-        # Create a key for this configuration
-        key="${batch}_${input_len}_${output_len}"
-        
-        # Store the configuration values
-        batch_sizes[$key]=$batch
-        input_lens[$key]=$input_len
-        output_lens[$key]=$output_len
-        
-        # Append values to arrays
-        values_ttft[$key]="${values_ttft[$key]:-}${ttft} "
-        values_tpot[$key]="${values_tpot[$key]:-}${tpot} "
-    done < "$json_file"
-
-    # Second pass: calculate averages excluding min and max
-    sorted_keys=( $(for key in "${!batch_sizes[@]}"; do echo "$key"; done | sort -t '_' -k2,2n -k1,1n) )
-
-    for key in "${sorted_keys[@]}"; do
-        # Convert space-separated strings to arrays
-        ttft_array=(${values_ttft[$key]})
-        tpot_array=(${values_tpot[$key]})
-        
-        # Need at least 3 values to exclude min and max
-        if [ ${#ttft_array[@]} -ge 3 ]; then
-            echo "Processing key: $key"
-            echo "Original TTFT values: ${ttft_array[*]}"
-            echo "Original TPOT values: ${tpot_array[*]}"
-            
-            # Sort arrays numerically
-            IFS=$'\n' ttft_sorted=($(sort -n <<<"${ttft_array[*]}"))
-            IFS=$'\n' tpot_sorted=($(sort -n <<<"${tpot_array[*]}"))
-            unset IFS
-            
-            echo "Sorted TTFT values: ${ttft_sorted[*]}"
-            echo "Sorted TPOT values: ${tpot_sorted[*]}"
-            
-            # Remove first (min) and last (max) elements
-            ttft_sorted=("${ttft_sorted[@]:1:${#ttft_sorted[@]}-2}")
-            tpot_sorted=("${tpot_sorted[@]:1:${#tpot_sorted[@]}-2}")
-            
-            echo "After removing min/max TTFT: ${ttft_sorted[*]}"
-            echo "After removing min/max TPOT: ${tpot_sorted[*]}"
-            
-            # Calculate averages
-            ttft_sum=0
-            tpot_sum=0
-            for i in "${!ttft_sorted[@]}"; do
-                ttft_sum=$(echo "$ttft_sum + ${ttft_sorted[$i]}" | bc)
-                tpot_sum=$(echo "$tpot_sum + ${tpot_sorted[$i]}" | bc)
-            done
-            
-            avg_ttft=$(echo "scale=2; $ttft_sum / ${#ttft_sorted[@]}" | bc)
-            avg_tpot=$(echo "scale=2; $tpot_sum / ${#tpot_sorted[@]}" | bc)
-            
-            echo "Final averages - TTFT: $avg_ttft, TPOT: $avg_tpot"
-            echo "----------------------------------------"
-
-            # Calculate throughputs using averages
-            input_throughput=$(echo "(${batch_sizes[$key]} * ${input_lens[$key]} * 1000) / $avg_ttft" | bc | awk '{printf "%.0f", $1}')
-            output_throughput=$(echo "(${batch_sizes[$key]} * 1000) / $avg_tpot" | bc | awk '{printf "%.0f", $1}')
-
-            # Write merged results to CSV
-            echo "$model_name,$data_type,${batch_sizes[$key]},${input_lens[$key]},${output_lens[$key]},$input_throughput,$output_throughput,$avg_ttft,$avg_tpot" >> "$csv_file"
-        fi
-    done
+    # Write to CSV file
+    {
+        echo "Counter Name,Value"
+        echo "Model,$model"
+        echo "Backend,$backend"
+        echo "Successful requests,$completed"
+        echo "Expected Concurrency,$expected_concurrency"
+        echo "Actual Concurrency,$concurrency"
+        echo "Benchmark duration (s),$duration"
+        echo "Total input tokens,$total_input_tokens"
+        echo "Total generated tokens,$total_output_tokens"
+        echo "Request throughput (req/s),$request_throughput"
+        echo "Input token throughput (tok/s),$input_throughput"
+        echo "Output token throughput (tok/s),$output_throughput"
+        echo "Mean TTFT (ms),$mean_ttft"
+        echo "Median TTFT (ms),$median_ttft"
+        echo "P99 TTFT (ms),$p99_ttft"
+        echo "Mean TPOT (ms),$mean_tpot"
+        echo "Median TPOT (ms),$median_tpot"
+        echo "P99 TPOT (ms),$p99_tpot"
+    } > "$csv_file"
 }
 
-function test_model() {
-    local model_name="$1"
-    local data_type="$2"
-    local model_dir="$3"
-
-    local in_out_sizes_var="in_out_sizes_mistral"
-    local tp=1
-
-    if [[ $data_type == *"fp16"* ]]; then
-        quant_option="--dtype float16"
-    else
-        quant_option="--quantization $data_type"
-    fi
-
-    if [[ $model_name == *"llama2"* || $model_name == *"phi"* || $model_name == *"qwen"* ]]; then
-        in_out_sizes_var="in_out_sizes_llama2"
-    fi
-
-    if [[ $model_name == *"mixtral"* ]]; then
-        export VLLM_WORKER_MULTIPROC_METHOD=spawn
-        tp=2
-    fi
-
-    eval in_out_sizes=(\${$in_out_sizes_var[@]})
-
+function run_benchmark() {
+    declare -n model_config=$1
+    
+    local model=${model_config["model"]}
+    local test=${model_config["test"]}
+    local tokenizer=${model_config["tokenizer"]}
+    local num_prompts=${model_config["num_prompts"]}
+    local base_url=${model_config["base_url"]}
+    local concurrency_list=(${model_config["concurrency"]})
+    
     PACKAGE_VERSION=$(pip show sglang 2>/dev/null | grep -oP 'Version: \K[0-9]+\.[0-9]+\.[0-9]+')
-	json_file=${RESULT_FILE}_${PACKAGE_VERSION}.jsonl
 
-    for in_out in "${in_out_sizes[@]}"
-    do
-        batch_size=$(echo $in_out | awk -F':' '{ print $1 }')
-        in_out_dims=$(echo $in_out | awk -F':' '{ print $2 }')
-
-        # Replace commas with spaces, then use read to put each word into an array
-        read -ra in_out_pair <<< "$(echo "$in_out_dims" | tr ',' ' ')"
-
+    for concurrency in "${concurrency_list[@]}"; do
         echo ""
         echo "==========================================================================================="
-        echo "Python Benchmark - Model: $model_name, Type: $data_type, BS: $batch_size, ISL/OSL: ${in_out_pair[0]}/${in_out_pair[1]}"
+        echo "Python Benchmark - Model: $model, Concurrency: $concurrency"
         echo "==========================================================================================="
 
-	num_prompts=10
-        total_num_prompts=$(( num_prompts * batch_size ))
-        total_num_prompts=$(( total_num_prompts > 4000 ? 4000 : total_num_prompts ))
+        total_num_prompts=$(( num_prompts * concurrency ))
+        total_num_prompts=$(( total_num_prompts > 10000 ? 10000 : total_num_prompts ))
+        json_file=${RESULT_FILE}_${test}_${PACKAGE_VERSION}_${concurrency}.jsonl
 
-
-        #BACKEND="vllm"
-        BACKEND="sglang"
-        echo "Run $run of $num_runs"
         python3 -m sglang.bench_serving \
-                --backend $BACKEND \
-                --model /models/DeepSeek-R1 \
-                --num-prompt $total_num_prompts \
-		--dataset-name sharegpt \
-                --port 30000 \
-                --max-concurrency $batch_size \
-                --output-file ${json_file}
+            --backend sglang \
+            --model $model \
+            --num-prompt $total_num_prompts \
+            --base-url $base_url \
+            --dataset-name sharegpt \
+            --max-concurrency $concurrency \
+            --output-file ${json_file}
+
+        json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}_${test}_${concurrency}.csv" "$model" "papyrus" "$concurrency"
     done
 
-	json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}.csv" "$model_name" "$data_type"
 }
 
-for model in "${models[@]}"
-do
-    IFS=',' read -r model_name model_type model_dir <<< "$model"
-    test_model "$model_name" "$model_type" "$model_dir"
-done
+DATASET_PATH=./ShareGPT_V3_unfiltered_cleaned_split.json
+NUM_PROMPTS=100
+CONCURRENCY_LIST=(1 4 8 16 32 64 128 256 512)
+TOKENIZER_PATH="~/models/DeepSeek-R1"
+BASE_URL="http://127.0.0.1:30000"
+
+declare -A deepseekr1_eval
+deepseekr1_eval["model"]=~/models/DeepSeek-R1
+deepseekr1_eval["test"]=deepseek-r1-stca-0220
+deepseekr1_eval["tokenizer"]=$TOKENIZER_PATH
+deepseekr1_eval["num_prompts"]=$NUM_PROMPTS
+deepseekr1_eval["base_url"]=$BASE_URL
+deepseekr1_eval["concurrency"]=${CONCURRENCY_LIST[@]}
+
+run_benchmark deepseekr1_eval
