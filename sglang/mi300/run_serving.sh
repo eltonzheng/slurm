@@ -87,7 +87,7 @@ function run_benchmark() {
             --max-concurrency $concurrency \
             --output-file ${json_file}
 
-        json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}_${test}_${concurrency}.csv" "$model" "papyrus" "$concurrency"
+        json_to_csv "$json_file" "${RESULT_FILE}_${PACKAGE_VERSION}_${test}_${concurrency}.csv" "$model" "sglang" "$concurrency"
     done
 
 }
