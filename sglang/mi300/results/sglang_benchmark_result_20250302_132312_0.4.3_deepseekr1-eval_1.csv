@@ -1,0 +1,18 @@
+Counter Name,Value
+Model,deepseekr1-eval
+Backend,papyrus
+Successful requests,99
+Expected Concurrency,1
+Actual Concurrency,0.90
+Benchmark duration (s),1176.95
+Total input tokens,34078
+Total generated tokens,21380
+Request throughput (req/s),0.08
+Input token throughput (tok/s),28.95
+Output token throughput (tok/s),18.17
+Mean TTFT (ms),584.30
+Median TTFT (ms),580.36
+P99 TTFT (ms),818.94
+Mean TPOT (ms),47.35
+Median TPOT (ms),46.79
+P99 TPOT (ms),61.45
