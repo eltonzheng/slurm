@@ -1,0 +1,10 @@
+Models,DataType,Batch,InputLen,OutputLen,PromptTokenPerSec,GenerationTokenPerSec,TimeToFirstToken(ms),InterTokenLatency(ms)
+deepseek-r1,fp8,1,1024,256,4536,36,225.72,27.10
+deepseek-r1,fp8,4,1024,256,6552,135,625.13,29.57
+deepseek-r1,fp8,8,1024,256,9063,249,903.85,32.04
+deepseek-r1,fp8,16,1024,256,9801,436,1671.55,36.69
+deepseek-r1,fp8,32,1024,256,11941,697,2744.13,45.89
+deepseek-r1,fp8,64,1024,256,14803,976,4427.17,65.56
+deepseek-r1,fp8,128,1024,256,17312,1365,7571.05,93.74
+deepseek-r1,fp8,256,1024,256,18589,1806,14101.89,141.72
+deepseek-r1,fp8,512,1024,256,19327,2044,27125.86,250.44
