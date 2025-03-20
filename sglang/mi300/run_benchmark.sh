@@ -1,6 +1,6 @@
 #!/bin/bash
 
-num_runs=8
+num_runs=7
 
 # Set ENGINE_DIR if provided, otherwise use "./engines"
 MODEL_DIR=${1:-~/models}
@@ -10,7 +10,6 @@ RESULT_FILE=${2:-./sglang_benchmark_result_$(date +%Y%m%d_%H%M%S)}
 
 # Function to detect GPU type
 extra_options=""
-
 
 models=(
 #"llama2-7b,fp16,$MODEL_DIR/llama2-7b-hf"
@@ -40,7 +39,7 @@ models=(
 #"qwen2-1.5b,awq,$MODEL_DIR/Qwen2-1.5B-Instruct-awq"
 #"deepseek-r1-dist-qwen-32b,fp16,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
 #"deepseek-r1-dist-qwen-32b,fp8,$MODEL_DIR/DeepSeek-R1-Distill-Qwen-32B"
-"deepseek-r1,fp8,/mnt/vast/deepseek/HF/DeepSeek-R1"
+"deepseek-r1,fp8,$MODEL_DIR/DeepSeek-R1"
 )
 in_out_sizes_mistral=("1:1024,256" "4:1024,256" "8:1024,256" "16:1024,256" "32:1024,256" "64:1024,256" "128:1024,256" "256:1024,256" "512:1024,256" "1:2048,256" "4:2048,256" "8:2048,256" "16:2048,256" "32:2048,256" "64:2048,256" "128:2048,256" "256:2048,256" "512:2048,256")
 
@@ -73,12 +72,12 @@ json_to_csv() {
 
         # Create a key for this configuration
         key="${batch}_${input_len}_${output_len}"
-        
+
         # Store the configuration values
         batch_sizes[$key]=$batch
         input_lens[$key]=$input_len
         output_lens[$key]=$output_len
-        
+
         # Append values to arrays
         values_ttft[$key]="${values_ttft[$key]:-}${ttft} "
         values_tpot[$key]="${values_tpot[$key]:-}${tpot} "
@@ -91,28 +90,28 @@ json_to_csv() {
         # Convert space-separated strings to arrays
         ttft_array=(${values_ttft[$key]})
         tpot_array=(${values_tpot[$key]})
-        
+
         # Need at least 3 values to exclude min and max
         if [ ${#ttft_array[@]} -ge 3 ]; then
             echo "Processing key: $key"
             echo "Original TTFT values: ${ttft_array[*]}"
             echo "Original TPOT values: ${tpot_array[*]}"
-            
+
             # Sort arrays numerically
             IFS=$'\n' ttft_sorted=($(sort -n <<<"${ttft_array[*]}"))
             IFS=$'\n' tpot_sorted=($(sort -n <<<"${tpot_array[*]}"))
             unset IFS
-            
+
             echo "Sorted TTFT values: ${ttft_sorted[*]}"
             echo "Sorted TPOT values: ${tpot_sorted[*]}"
-            
+
             # Remove first (min) and last (max) elements
             ttft_sorted=("${ttft_sorted[@]:1:${#ttft_sorted[@]}-2}")
             tpot_sorted=("${tpot_sorted[@]:1:${#tpot_sorted[@]}-2}")
-            
+
             echo "After removing min/max TTFT: ${ttft_sorted[*]}"
             echo "After removing min/max TPOT: ${tpot_sorted[*]}"
-            
+
             # Calculate averages
             ttft_sum=0
             tpot_sum=0
@@ -120,10 +119,10 @@ json_to_csv() {
                 ttft_sum=$(echo "$ttft_sum + ${ttft_sorted[$i]}" | bc)
                 tpot_sum=$(echo "$tpot_sum + ${tpot_sorted[$i]}" | bc)
             done
-            
+
             avg_ttft=$(echo "scale=2; $ttft_sum / ${#ttft_sorted[@]}" | bc)
             avg_tpot=$(echo "scale=2; $tpot_sum / ${#tpot_sorted[@]}" | bc)
-            
+
             echo "Final averages - TTFT: $avg_ttft, TPOT: $avg_tpot"
             echo "----------------------------------------"
 
@@ -184,9 +183,9 @@ function test_model() {
             echo "Run $run of $num_runs"
             python3 -m sglang.bench_serving \
                 --backend $BACKEND \
-                --model /models/DeepSeek-R1 \
+                --model $model_dir \
                 --num-prompt $batch_size \
-                --port 30000 \
+                --port 40000 \
                 --random-range-ratio 1.0 \
                 --random-input-len ${in_out_pair[0]} \
                 --random-output-len ${in_out_pair[1]} \

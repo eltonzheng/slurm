@@ -58,14 +58,14 @@ json_to_csv() {
 
 function run_benchmark() {
     declare -n model_config=$1
-    
+
     local model=${model_config["model"]}
     local test=${model_config["test"]}
     local tokenizer=${model_config["tokenizer"]}
     local num_prompts=${model_config["num_prompts"]}
     local base_url=${model_config["base_url"]}
     local concurrency_list=(${model_config["concurrency"]})
-    
+
     PACKAGE_VERSION=$(pip show sglang 2>/dev/null | grep -oP 'Version: \K[0-9]+\.[0-9]+\.[0-9]+')
 
     for concurrency in "${concurrency_list[@]}"; do
@@ -96,11 +96,11 @@ DATASET_PATH=./ShareGPT_V3_unfiltered_cleaned_split.json
 NUM_PROMPTS=100
 CONCURRENCY_LIST=(1 4 8 16 32 64 128 256 512)
 TOKENIZER_PATH="~/models/DeepSeek-R1"
-BASE_URL="http://127.0.0.1:30000"
+BASE_URL="http://127.0.0.1:40000"
 
 declare -A deepseekr1_eval
 deepseekr1_eval["model"]=~/models/DeepSeek-R1
-deepseekr1_eval["test"]=deepseek-r1-stca-0220
+deepseekr1_eval["test"]=deepseek-r1-stca-0303
 deepseekr1_eval["tokenizer"]=$TOKENIZER_PATH
 deepseekr1_eval["num_prompts"]=$NUM_PROMPTS
 deepseekr1_eval["base_url"]=$BASE_URL
